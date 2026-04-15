@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>DDoS ML</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#060d14;--bg1:#0a1520;--bg2:#0d1e2e;--bg3:#102030;
+  --border:#1a3550;--glow:#0e5fa0;
+  --cyan:#00d4ff;--cyan2:#0099cc;
+  --red:#ff2244;--red2:#cc1133;
+  --green:#00ff88;--green2:#00cc66;
+  --yellow:#ffcc00;--orange:#ff8800;
+  --purple:#9944ff;--purple2:#6622cc;
+  --txt:#b8d4ee;--txt2:#5a7a99;--txth:#e8f6ff;
+  --sb:220px;--hh:60px;
+  --mono:'JetBrains Mono',monospace;
+  --hud:'Orbitron',monospace;
+  --body:'Rajdhani',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background:
+  radial-gradient(ellipse 60% 40% at 10% 10%,rgba(0,100,200,.06) 0%,transparent 70%),
+  radial-gradient(ellipse 50% 60% at 90% 90%,rgba(0,60,150,.05) 0%,transparent 70%);
+  pointer-events:none;z-index:0}
+/* Scanlines */
+body::after{content:'';position:fixed;inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,212,255,.008) 3px,rgba(0,212,255,.008) 4px);
+  pointer-events:none;z-index:9998}
+
+/* ── NAVBAR ── */
+.nav{position:fixed;top:0;left:0;right:0;height:var(--hh);
+  background:linear-gradient(90deg,#04101d 0%,#061828 100%);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;padding:0 24px;z-index:1000;gap:16px}
+.nav-logo{display:flex;align-items:center;gap:10px}
+.nav-logo svg{width:32px;height:32px;filter:drop-shadow(0 0 10px rgba(0,212,255,.5))}
+.nav-title{font-family:var(--hud);font-size:20px;font-weight:900;
+  color:var(--cyan);letter-spacing:2px;text-shadow:0 0 20px rgba(0,212,255,.4)}
+.nav-sub{font-size:11px;color:var(--txt2);font-family:var(--mono);letter-spacing:1px}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.status-pill{display:flex;align-items:center;gap:7px;padding:5px 16px;
+  border-radius:20px;font-family:var(--hud);font-size:10px;font-weight:700;
+  letter-spacing:2px;transition:all .3s;cursor:default}
+.status-pill.ok{background:rgba(0,255,136,.08);border:1px solid rgba(0,255,136,.25);color:var(--green)}
+.status-pill.attack{background:rgba(255,34,68,.12);border:1px solid rgba(255,34,68,.4);
+  color:var(--red);animation:pulse-red 1s infinite}
+@keyframes pulse-red{0%,100%{box-shadow:0 0 8px rgba(255,34,68,.2)}50%{box-shadow:0 0 24px rgba(255,34,68,.6)}}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;animation:blink .9s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.nav-clock{font-family:var(--mono);font-size:12px;color:var(--txt2)}
+
+/* ── SIDEBAR ── */
+.sidebar{position:fixed;top:var(--hh);left:0;bottom:0;width:var(--sb);
+  background:var(--bg1);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;z-index:500;padding:16px 0}
+.nav-lbl{font-family:var(--hud);font-size:8px;letter-spacing:3px;
+  color:var(--txt2);padding:10px 18px 5px;text-transform:uppercase}
+.navlink{display:flex;align-items:center;gap:11px;padding:10px 18px;
+  cursor:pointer;border-left:3px solid transparent;font-size:14px;font-weight:600;
+  color:var(--txt2);transition:all .15s;text-decoration:none;user-select:none}
+.navlink:hover{background:rgba(0,212,255,.04);color:var(--txt)}
+.navlink.on{background:rgba(0,212,255,.07);border-left-color:var(--cyan);color:var(--cyan)}
+.navlink .ico{font-size:15px;width:18px;text-align:center}
+.nbadge{margin-left:auto;background:var(--red);color:#fff;font-size:9px;
+  padding:2px 6px;border-radius:10px;font-family:var(--mono)}
+.sb-footer{margin-top:auto;padding:14px 18px;border-top:1px solid var(--border)}
+.sb-model{font-family:var(--mono);font-size:10px;color:var(--txt2);line-height:1.8}
+.sb-model b{color:var(--cyan);font-size:11px}
+
+/* ── MAIN ── */
+.main{margin-left:var(--sb);margin-top:var(--hh);padding:20px;min-height:calc(100vh - var(--hh))}
+.page{display:none}.page.on{display:block}
+
+/* ── PAGE HEADER ── */
+.pg-hdr{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.pg-title{font-family:var(--hud);font-size:22px;font-weight:900;color:var(--txth)}
+.pg-sub{font-size:13px;color:var(--txt2);font-family:var(--mono)}
+.pg-badge{margin-left:auto;display:flex;align-items:center;gap:8px}
+
+/* ── STAT CARDS ── */
+.sc-row{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}
+.sc{background:var(--bg1);border:1px solid var(--border);border-radius:10px;
+  padding:18px;position:relative;overflow:hidden;cursor:default}
+.sc::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.sc.c::before{background:var(--cyan)}.sc.r::before{background:var(--red)}
+.sc.g::before{background:var(--green)}.sc.y::before{background:var(--yellow)}
+.sc.p::before{background:var(--purple)}
+.sc-icon{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;
+  justify-content:center;font-size:20px;margin-bottom:12px}
+.sc.c .sc-icon{background:rgba(0,212,255,.1)}
+.sc.r .sc-icon{background:rgba(255,34,68,.1)}
+.sc.g .sc-icon{background:rgba(0,255,136,.1)}
+.sc.y .sc-icon{background:rgba(255,204,0,.1)}
+.sc.p .sc-icon{background:rgba(153,68,255,.1)}
+.sc-label{font-family:var(--hud);font-size:9px;letter-spacing:2px;color:var(--txt2);
+  text-transform:uppercase;margin-bottom:6px}
+.sc-val{font-family:var(--hud);font-size:30px;font-weight:900;line-height:1}
+.sc.c .sc-val{color:var(--cyan);text-shadow:0 0 20px rgba(0,212,255,.3)}
+.sc.r .sc-val{color:var(--red);text-shadow:0 0 20px rgba(255,34,68,.3)}
+.sc.g .sc-val{color:var(--green);text-shadow:0 0 20px rgba(0,255,136,.3)}
+.sc.y .sc-val{color:var(--yellow);text-shadow:0 0 20px rgba(255,204,0,.3)}
+.sc.p .sc-val{color:var(--purple);text-shadow:0 0 20px rgba(153,68,255,.3)}
+.sc-sub{font-size:11px;color:var(--txt2);font-family:var(--mono);margin-top:4px}
+.sc-trend{position:absolute;top:14px;right:14px;font-size:11px;font-family:var(--mono);
+  display:flex;align-items:center;gap:4px}
+.sc-trend.up{color:var(--red)}.sc-trend.down{color:var(--green)}
+
+/* ── TABS ── */
+.tabs{display:flex;gap:4px;background:var(--bg1);border:1px solid var(--border);
+  border-radius:8px;padding:4px;width:fit-content;margin-bottom:18px}
+.tab{padding:7px 18px;border-radius:5px;font-family:var(--hud);font-size:10px;
+  letter-spacing:1px;cursor:pointer;color:var(--txt2);font-weight:700;transition:all .2s}
+.tab:hover{color:var(--txt)}
+.tab.on{background:rgba(0,212,255,.1);color:var(--cyan);box-shadow:0 0 10px rgba(0,212,255,.15)}
+
+/* ── CARD ── */
+.card{background:var(--bg1);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:14px}
+.card-h{display:flex;align-items:center;gap:10px;padding:12px 16px;
+  border-bottom:1px solid var(--border);background:rgba(255,255,255,.015)}
+.card-title{font-family:var(--hud);font-size:10px;letter-spacing:2px;
+  color:var(--txth);text-transform:uppercase;flex:1}
+.card-badge{font-family:var(--mono);font-size:10px;color:var(--txt2);
+  background:rgba(255,255,255,.04);padding:2px 8px;border-radius:4px}
+.card-b{padding:16px}
+
+/* ── GRID ── */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.span2{grid-column:span 2}
+
+/* ── CHART ── */
+.ch-wrap{position:relative;height:200px}
+
+/* ── TABLE / FEED ── */
+.tbl-hdr{display:grid;gap:8px;padding:8px 14px;
+  font-family:var(--hud);font-size:8px;letter-spacing:2px;color:var(--txt2);
+  border-bottom:1px solid var(--border);text-transform:uppercase}
+.tbl-row{display:grid;gap:8px;padding:8px 14px;
+  border-bottom:1px solid rgba(26,53,80,.4);
+  font-family:var(--mono);font-size:11px;align-items:center;
+  transition:background .12s;cursor:default}
+.tbl-row:hover{background:rgba(0,212,255,.03)}
+.feed{max-height:300px;overflow-y:auto}
+.feed::-webkit-scrollbar{width:3px}
+.feed::-webkit-scrollbar-thumb{background:var(--glow);border-radius:2px}
+
+/* Attack table: type | ip | time */
+.atk-hdr{grid-template-columns:110px 1fr 1fr 160px}
+.atk-row{grid-template-columns:110px 1fr 1fr 160px}
+/* Blocked: ip | reason | time */
+.blk-hdr{grid-template-columns:140px 1fr 1fr 100px 80px}
+.blk-row{grid-template-columns:140px 1fr 1fr 100px 80px}
+
+/* ── TAGS ── */
+.tag{display:inline-block;padding:3px 10px;border-radius:4px;
+  font-family:var(--hud);font-size:9px;font-weight:700;letter-spacing:.5px;white-space:nowrap}
+.tag.attack{background:rgba(255,34,68,.12);color:var(--red);border:1px solid rgba(255,34,68,.25)}
+.tag.benign{background:rgba(0,255,136,.08);color:var(--green);border:1px solid rgba(0,255,136,.2)}
+.tag.blocked{background:rgba(255,136,0,.1);color:var(--orange);border:1px solid rgba(255,136,0,.25)}
+.tag.udp{background:rgba(0,212,255,.1);color:var(--cyan);border:1px solid rgba(0,212,255,.2)}
+.tag.ldap{background:rgba(153,68,255,.12);color:var(--purple);border:1px solid rgba(153,68,255,.25)}
+.tag.mssql{background:rgba(255,204,0,.1);color:var(--yellow);border:1px solid rgba(255,204,0,.2)}
+.tag.syn{background:rgba(255,34,68,.12);color:var(--red);border:1px solid rgba(255,34,68,.25)}
+.tag.http{background:rgba(255,136,0,.1);color:var(--orange);border:1px solid rgba(255,136,0,.25)}
+
+/* ── ATTACK TYPE DISTRIBUTION ── */
+.dist-bar{margin:6px 0;display:flex;align-items:center;gap:10px}
+.dist-label{font-family:var(--mono);font-size:10px;color:var(--txt);width:130px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dist-track{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.dist-fill{height:100%;border-radius:3px;transition:width .5s ease}
+.dist-pct{font-family:var(--mono);font-size:10px;color:var(--txt2);width:36px;text-align:right;flex-shrink:0}
+
+/* ── DONUT CHART ── */
+.donut-wrap{position:relative;height:180px;display:flex;align-items:center;justify-content:center}
+.donut-center{position:absolute;text-align:center;pointer-events:none}
+.donut-val{font-family:var(--hud);font-size:22px;font-weight:900;color:var(--cyan)}
+.donut-lbl{font-family:var(--mono);font-size:10px;color:var(--txt2)}
+
+/* ── BUTTONS ── */
+.btn{padding:7px 16px;border-radius:5px;font-family:var(--hud);font-size:10px;
+  font-weight:700;letter-spacing:1px;cursor:pointer;border:1px solid;transition:all .2s}
+.btn-r{background:rgba(255,34,68,.1);border-color:rgba(255,34,68,.3);color:var(--red)}
+.btn-r:hover{background:rgba(255,34,68,.2);box-shadow:0 0 12px rgba(255,34,68,.25)}
+.btn-c{background:rgba(0,212,255,.08);border-color:rgba(0,212,255,.25);color:var(--cyan)}
+.btn-c:hover{background:rgba(0,212,255,.15);box-shadow:0 0 12px rgba(0,212,255,.2)}
+.btn-g{background:rgba(0,255,136,.08);border-color:rgba(0,255,136,.25);color:var(--green)}
+.unblock{background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.2);
+  color:var(--cyan);padding:3px 10px;border-radius:4px;font-family:var(--mono);
+  font-size:10px;cursor:pointer;transition:all .2s}
+.unblock:hover{background:rgba(0,212,255,.18)}
+
+/* ── ML MODEL CARDS ── */
+.ml-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;
+  padding:14px;margin-bottom:10px}
+.ml-card.best{border-color:var(--cyan);box-shadow:0 0 15px rgba(0,212,255,.08)}
+.ml-name{font-family:var(--hud);font-size:12px;color:var(--cyan);
+  margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.ml-star{background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.3);
+  font-size:9px;padding:2px 8px;border-radius:10px}
+.metrics{display:flex;gap:20px}
+.metric{display:flex;flex-direction:column;gap:2px}
+.metric-l{font-family:var(--hud);font-size:8px;letter-spacing:2px;
+  color:var(--txt2);text-transform:uppercase}
+.metric-v{font-family:var(--hud);font-size:18px;font-weight:900;color:var(--cyan)}
+.pbar{height:3px;background:var(--border);border-radius:2px;margin-top:10px}
+.pfill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--cyan2),var(--cyan));transition:width 1s}
+
+/* ── TOAST ── */
+.toast{position:fixed;top:70px;right:20px;z-index:3000;
+  background:rgba(255,34,68,.14);border:1px solid rgba(255,34,68,.4);
+  border-radius:8px;padding:10px 16px;font-family:var(--hud);font-size:11px;
+  color:var(--red);display:flex;align-items:center;gap:10px;
+  transform:translateX(120%);transition:transform .3s ease;pointer-events:none}
+.toast.show{transform:translateX(0)}
+
+/* ── SETTINGS ── */
+.srow{display:flex;align-items:center;justify-content:space-between;
+  padding:14px 0;border-bottom:1px solid var(--border)}
+.slbl{font-size:15px;font-weight:600}.sdesc{font-size:11px;color:var(--txt2);margin-top:2px}
+.tog{position:relative;width:44px;height:24px;cursor:pointer}
+.tog input{display:none}
+.tog-sl{position:absolute;inset:0;background:var(--border);border-radius:24px;transition:.3s}
+.tog-sl::before{content:'';position:absolute;width:18px;height:18px;
+  left:3px;top:3px;background:var(--txt2);border-radius:50%;transition:.3s}
+.tog input:checked+.tog-sl{background:rgba(0,212,255,.3)}
+.tog input:checked+.tog-sl::before{transform:translateX(20px);background:var(--cyan)}
+select.dark,input.dark{background:var(--bg2);border:1px solid var(--border);
+  color:var(--txt);padding:7px 12px;border-radius:5px;font-family:var(--mono);
+  font-size:12px;outline:none}
+select.dark:focus,input.dark:focus{border-color:var(--cyan)}
+
+/* ── ATTACK MAP ── */
+.map-wrap{height:260px;background:var(--bg2);border-radius:6px;position:relative;overflow:hidden}
+.map-dot{position:absolute;border-radius:50%;transform:translate(-50%,-50%);
+  width:10px;height:10px;animation:mdot 2s ease-in-out infinite}
+.map-dot.a{background:var(--red);box-shadow:0 0 8px var(--red)}
+@keyframes mdot{0%,100%{transform:translate(-50%,-50%) scale(1);opacity:1}
+  50%{transform:translate(-50%,-50%) scale(2);opacity:.4}}
+
+/* ── LIVE INDICATOR ── */
+.live{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);
+  font-size:10px;color:var(--green)}
+.live::before{content:'';width:6px;height:6px;border-radius:50%;
+  background:var(--green);animation:blink .9s infinite}
+
+/* ── CODE BLOCK ── */
+.codeblock{background:var(--bg2);border:1px solid var(--border);border-radius:6px;
+  padding:14px;font-family:var(--mono);font-size:12px;line-height:2;margin-bottom:10px}
+.codeblock .cm{color:var(--txt2)}.codeblock .cp{color:var(--green)}.codeblock .cx{color:var(--cyan)}
+
+@media(max-width:900px){.sc-row{grid-template-columns:1fr 1fr}.sidebar{display:none}.main{margin-left:0}}
+</style>
+</head>
+<body>
+
+<!-- Toast -->
+<div class="toast" id="toast">
+  <span>🚨</span><span id="toastMsg">ATTACK DETECTED</span>
+</div>
+
+<!-- ── NAVBAR ── -->
+<nav class="nav">
+  <div class="nav-logo">
+    <svg viewBox="0 0 32 32" fill="none">
+      <path d="M16 2L4 8v8c0 7.7 5.2 14.9 12 17 6.8-2.1 12-9.3 12-17V8L16 2z" fill="rgba(0,212,255,.15)" stroke="#00d4ff" stroke-width="1.5"/>
+      <path d="M11 16l3 3 7-7" stroke="#00d4ff" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    <div>
+      <div class="nav-title">DDoSShield</div>
+      <div class="nav-sub">Real-time threat monitoring & analytics</div>
+    </div>
+  </div>
+  <div class="nav-right">
+    <span class="live">LIVE</span>
+    <div class="status-pill ok" id="statusPill">
+      <span class="dot"></span><span id="statusTxt">PROTECTED</span>
+    </div>
+    <div class="nav-clock" id="navClock">00:00:00</div>
+  </div>
+</nav>
+
+<!-- ── SIDEBAR ── -->
+<aside class="sidebar">
+  <div class="nav-lbl">Monitor</div>
+  <div class="navlink on" onclick="go('home')"><span class="ico">🛡️</span>Overview</div>
+  <div class="navlink" onclick="go('attacks')"><span class="ico">⚠️</span>Recent Attacks<span class="nbadge" id="atkBadge">0</span></div>
+  <div class="navlink" onclick="go('blocked')"><span class="ico">🚫</span>Blocked IPs<span class="nbadge" id="blkBadge">0</span></div>
+
+  <div class="nav-lbl" style="margin-top:8px">Analysis</div>
+  <div class="navlink" onclick="go('trends')"><span class="ico">📈</span>Traffic Trends</div>
+  <div class="navlink" onclick="go('ml')"><span class="ico">🤖</span>ML Models</div>
+
+  <div class="nav-lbl" style="margin-top:8px">System</div>
+  <div class="navlink" onclick="go('howto')"><span class="ico">⚡</span>Attack Guide</div>
+  <div class="navlink" onclick="go('settings')"><span class="ico">⚙️</span>Settings</div>
+
+  <div class="sb-footer">
+    <div class="sb-model">
+      <b id="sbModel">Loading...</b><br>
+      Active ML Model<br>
+      Uptime: <span id="sbUptime" style="color:var(--txt)">—</span>
+    </div>
+  </div>
+</aside>
+
+<!-- ══════════════════════════════════════════════
+     MAIN
+══════════════════════════════════════════════ -->
+<main class="main">
+
+<!-- ═════════ HOME / OVERVIEW ═════════ -->
+<div class="page on" id="pg-home">
+  <div class="pg-hdr">
+    <div>
+      <div class="pg-title">Dashboard</div>
+      <div class="pg-sub">Real-time threat monitoring and analytics</div>
+    </div>
+    <div class="pg-badge">
+      <button class="btn btn-r" onclick="simulateAttack()">🚀 Simulate Attack</button>
+      <button class="btn btn-c" onclick="fetchStatus()">🔄 Refresh</button>
+    </div>
+  </div>
+
+  <!-- 3 stat cards -->
+  <div class="sc-row">
+    <div class="sc r">
+      <div class="sc-icon">⚠️</div>
+      <div class="sc-label">Total Attacks Detected</div>
+      <div class="sc-val" id="scAttacks">0</div>
+      <div class="sc-sub" id="scAttackSub">Since startup</div>
+      <div class="sc-trend up" id="scAttackTrend" style="display:none">↑ +<span id="trendVal">0</span>%</div>
+    </div>
+    <div class="sc g">
+      <div class="sc-icon">🛡️</div>
+      <div class="sc-label">Blocked IPs</div>
+      <div class="sc-val" id="scBlocked">0</div>
+      <div class="sc-sub">Auto + manual blocks</div>
+    </div>
+    <div class="sc c">
+      <div class="sc-icon">📡</div>
+      <div class="sc-label">Attack Types</div>
+      <div class="sc-val" id="scTypes">0</div>
+      <div class="sc-sub">Distinct attack patterns</div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab on" onclick="switchTab('overview')">Overview</div>
+    <div class="tab" onclick="switchTab('geographic')">Geographic</div>
+    <div class="tab" onclick="switchTab('timeline')">Timeline</div>
+  </div>
+
+  <!-- TAB: Overview -->
+  <div id="tab-overview">
+    <div class="g2">
+      <!-- Attack Types Distribution (bar chart) -->
+      <div class="card">
+        <div class="card-h"><span>📊</span><span class="card-title">Attack Types Distribution</span></div>
+        <div class="card-b"><div class="ch-wrap"><canvas id="distChart"></canvas></div></div>
+      </div>
+      <!-- Top Attack Categories (donut) -->
+      <div class="card">
+        <div class="card-h"><span>🎯</span><span class="card-title">Top Attack Categories</span></div>
+        <div class="card-b">
+          <div class="donut-wrap">
+            <canvas id="donutChart" style="max-width:180px;max-height:180px"></canvas>
+            <div class="donut-center">
+              <div class="donut-val" id="donutCenter">0</div>
+              <div class="donut-lbl">Total</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Attacks + Blocked IPs side by side -->
+    <div class="g2">
+      <div class="card">
+        <div class="card-h"><span>⚠️</span><span class="card-title">Recent Attacks</span><span class="card-badge" id="atkCount">0</span></div>
+        <div class="tbl-hdr atk-hdr"><span>Type</span><span>IP Address</span><span>Rate/s</span><span>Time</span></div>
+        <div class="feed" id="atkFeed"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><span>📡</span><span class="card-title">Live Traffic Feed</span><span class="card-badge" id="feedCnt">0</span></div>
+        <div class="tbl-hdr atk-hdr"><span>Type</span><span>IP Address</span><span>Path</span><span>Time</span></div>
+        <div class="feed" id="liveFeed"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><span>🚫</span><span class="card-title">Recently Blocked IPs</span><span class="card-badge" id="blkCount">0</span></div>
+      <div class="tbl-hdr" style="grid-template-columns:130px 1fr 150px"><span>IP Address</span><span>Reason</span><span>Time</span></div>
+      <div class="feed" id="blkFeed"></div>
+    </div>
+  </div>
+
+  <!-- TAB: Geographic -->
+  <div id="tab-geographic" style="display:none">
+    <div class="card">
+      <div class="card-h"><span>🗺️</span><span class="card-title">Attack Origin Map</span><span class="card-badge">Real-Time</span></div>
+      <div class="card-b" style="padding:0">
+        <div class="map-wrap" id="mapWrap">
+          <svg width="100%" height="100%" viewBox="0 0 1000 500">
+            <rect width="1000" height="500" fill="#0a1520"/>
+            <path d="M80,60 L200,50 L260,80 L280,140 L250,180 L200,220 L160,240 L120,200 L80,160 L60,100 Z" fill="#1a3550" opacity=".8"/>
+            <path d="M200,250 L260,240 L290,280 L280,360 L240,420 L200,400 L180,350 L190,280 Z" fill="#1a3550" opacity=".8"/>
+            <path d="M440,50 L520,45 L540,80 L520,120 L480,130 L440,110 L420,80 Z" fill="#1a3550" opacity=".8"/>
+            <path d="M440,150 L520,140 L550,200 L540,320 L480,380 L420,340 L400,260 L420,180 Z" fill="#1a3550" opacity=".8"/>
+            <path d="M540,40 L800,30 L840,80 L820,160 L760,200 L680,210 L600,190 L540,150 L520,100 Z" fill="#1a3550" opacity=".8"/>
+            <path d="M760,280 L860,270 L880,340 L840,380 L760,370 L730,320 Z" fill="#1a3550" opacity=".8"/>
+            <line x1="0" y1="250" x2="1000" y2="250" stroke="#1a3550" stroke-width=".5"/>
+            <line x1="500" y1="0" x2="500" y2="500" stroke="#1a3550" stroke-width=".5"/>
+          </svg>
+          <div id="mapDots"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: Timeline -->
+  <div id="tab-timeline" style="display:none">
+    <div class="card">
+      <div class="card-h"><span>📈</span><span class="card-title">Traffic Timeline</span><span class="card-badge live">LIVE</span></div>
+      <div class="card-b"><div class="ch-wrap" style="height:240px"><canvas id="timelineChart"></canvas></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ RECENT ATTACKS ═════════ -->
+<div class="page" id="pg-attacks">
+  <div class="pg-hdr">
+    <div><div class="pg-title">Recent Attacks</div><div class="pg-sub">All detected attack events from real traffic</div></div>
+  </div>
+  <div class="card">
+    <div class="card-h"><span>⚠️</span><span class="card-title">Attack Log</span><span class="card-badge" id="atkFullCnt">0 events</span></div>
+    <div class="tbl-hdr" style="grid-template-columns:120px 140px 1fr 80px 100px 160px">
+      <span>Attack Type</span><span>Source IP</span><span>Path Hit</span><span>Req/s</span><span>Confidence</span><span>Time</span>
+    </div>
+    <div class="feed" id="atkFullFeed" style="max-height:600px"></div>
+  </div>
+</div>
+
+<!-- ═════════ BLOCKED IPs ═════════ -->
+<div class="page" id="pg-blocked">
+  <div class="pg-hdr">
+    <div><div class="pg-title">Blocked IPs</div><div class="pg-sub">Auto-blocked and manually blocked addresses</div></div>
+    <div class="pg-badge">
+      <button class="btn btn-r" onclick="clearAllBlocks()">🗑️ Clear All</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-h"><span>🚫</span><span class="card-title">Blocked IPs</span><span class="card-badge" id="blkFullCnt">0 blocked</span></div>
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px">
+      <thead><tr style="border-bottom:1px solid var(--border)">
+        <th style="padding:9px 14px;text-align:left;font-family:var(--hud);font-size:9px;letter-spacing:2px;color:var(--txt2);text-transform:uppercase">IP Address</th>
+        <th style="padding:9px 14px;text-align:left;font-family:var(--hud);font-size:9px;letter-spacing:2px;color:var(--txt2);text-transform:uppercase">Reason</th>
+        <th style="padding:9px 14px;text-align:left;font-family:var(--hud);font-size:9px;letter-spacing:2px;color:var(--txt2);text-transform:uppercase">Blocked At</th>
+        <th style="padding:9px 14px;text-align:left;font-family:var(--hud);font-size:9px;letter-spacing:2px;color:var(--txt2);text-transform:uppercase">Expires In</th>
+        <th style="padding:9px 14px;text-align:left;font-family:var(--hud);font-size:9px;letter-spacing:2px;color:var(--txt2);text-transform:uppercase">Action</th>
+      </tr></thead>
+      <tbody id="blkTableBody"><tr><td colspan="5" style="text-align:center;color:var(--txt2);padding:30px">No IPs blocked</td></tr></tbody>
+    </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ TRAFFIC TRENDS ═════════ -->
+<div class="page" id="pg-trends">
+  <div class="pg-hdr"><div><div class="pg-title">Traffic Trends</div><div class="pg-sub">Real-time traffic analysis</div></div></div>
+  <div class="card">
+    <div class="card-h"><span>📈</span><span class="card-title">Requests Per Second</span></div>
+    <div class="card-b"><div class="ch-wrap" style="height:260px"><canvas id="trendChart"></canvas></div></div>
+  </div>
+  <div class="g2">
+    <div class="card">
+      <div class="card-h"><span>🎯</span><span class="card-title">Attack Type Breakdown</span></div>
+      <div class="card-b" id="typeBreakdown"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><span>📊</span><span class="card-title">Detection Stats</span></div>
+      <div class="card-b" style="font-family:var(--mono);font-size:12px;line-height:2.2">
+        <div>Total Requests: <span id="t-total" style="color:var(--cyan)">0</span></div>
+        <div>Attacks Detected: <span id="t-atk" style="color:var(--red)">0</span></div>
+        <div>Benign Traffic: <span id="t-ben" style="color:var(--green)">0</span></div>
+        <div>Attack Rate: <span id="t-rate" style="color:var(--yellow)">0%</span></div>
+        <div>IPs Blocked: <span id="t-blk" style="color:var(--orange)">0</span></div>
+        <div>Model: <span id="t-model" style="color:var(--cyan)">—</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ ML MODELS ═════════ -->
+<div class="page" id="pg-ml">
+  <div class="pg-hdr"><div><div class="pg-title">ML Models</div><div class="pg-sub">3 models trained on CIC-IDS-2017 dataset</div></div></div>
+  <div class="sc-row" style="grid-template-columns:repeat(3,1fr)">
+    <div class="sc c"><div class="sc-icon">🏆</div><div class="sc-label">Best Model</div><div class="sc-val" style="font-size:16px" id="mlBest">—</div><div class="sc-sub">Auto-selected by F1</div></div>
+    <div class="sc g"><div class="sc-icon">✅</div><div class="sc-label">Accuracy</div><div class="sc-val" id="mlAcc">—</div><div class="sc-sub">Test set</div></div>
+    <div class="sc c"><div class="sc-icon">📊</div><div class="sc-label">F1 Score</div><div class="sc-val" id="mlF1">—</div><div class="sc-sub">Weighted avg</div></div>
+  </div>
+  <div class="g2">
+    <div class="card">
+      <div class="card-h"><span>🤖</span><span class="card-title">Model Comparison</span></div>
+      <div class="card-b" id="mlCards"><div style="color:var(--txt2);text-align:center;padding:20px">Run python train_model.py first</div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><span>📊</span><span class="card-title">Accuracy Chart</span></div>
+      <div class="card-b"><div class="ch-wrap"><canvas id="mlChart"></canvas></div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-h"><span>ℹ️</span><span class="card-title">Dataset Info</span></div>
+    <div class="card-b" style="font-family:var(--mono);font-size:12px;line-height:2">
+      <span style="color:var(--cyan)">📁 DrDoS_LDAP.csv</span> — Lightweight LDAP amplification attack<br>
+      <span style="color:var(--cyan)">📁 DrDoS_MSSQL.csv</span> — MSSQL reflection/amplification attack<br>
+      <span style="color:var(--cyan)">📁 DrDoS_UDP.csv</span> — UDP flood / amplification attack<br>
+      <span style="color:var(--cyan)">📁 Monday-WorkingHours.pcap_ISCX.csv</span> — Benign baseline traffic<br>
+      <br><span style="color:var(--txt2)">Dataset: CIC-IDS-2017 &nbsp;|&nbsp; Features: 68 network flow features &nbsp;|&nbsp; Binary: BENIGN / ATTACK</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ ATTACK GUIDE ═════════ -->
+<div class="page" id="pg-howto">
+  <div class="pg-hdr"><div><div class="pg-title">How to Test the System</div><div class="pg-sub">Send real traffic to trigger ML detection</div></div></div>
+  <div class="card">
+    <div class="card-h"><span>⚡</span><span class="card-title">Locust DDoS Simulation</span></div>
+    <div class="card-b">
+      <div class="codeblock">
+        <div class="cm"># Step 1: Install Locust</div>
+        <div><span class="cp">$</span> pip install locust</div>
+        <br>
+        <div class="cm"># Step 2: Run with 500 users, 50/sec spawn rate</div>
+        <div><span class="cp">$</span> locust -f locustfile.py --headless <span class="cx">-u 500 -r 50</span> --host=http://localhost:5000</div>
+        <br>
+        <div class="cm"># Step 3: Or use Locust Web UI</div>
+        <div><span class="cp">$</span> locust -f locustfile.py --host=http://localhost:5000</div>
+        <div class="cm"># Then open http://localhost:8089</div>
+      </div>
+      <div class="codeblock">
+        <div class="cm"># Manual curl flood (bash) — 1000 requests fast</div>
+        <div><span class="cp">$</span> <span class="cx">for i in $(seq 1 1000); do curl -s http://localhost:5000/api/test &amp;; done</span></div>
+        <br>
+        <div class="cm"># Python requests flood</div>
+        <div><span class="cp">$</span> python3 -c <span class="cx">"import requests,threading; [threading.Thread(target=lambda:requests.get('http://localhost:5000/api/test')).start() for _ in range(500)]"</span></div>
+        <br>
+        <div class="cm"># Apache Bench (ab) — 5000 requests, 100 concurrent</div>
+        <div><span class="cp">$</span> ab -n 5000 -c 100 http://localhost:5000/api/test</div>
+      </div>
+      <div style="background:rgba(0,212,255,.05);border:1px solid rgba(0,212,255,.15);border-radius:6px;padding:14px;font-family:var(--mono);font-size:11px;line-height:2">
+        <div style="color:var(--cyan);font-family:var(--hud);font-size:10px;letter-spacing:1px;margin-bottom:6px">ATTACK TARGET ENDPOINTS</div>
+        <div>GET <span style="color:var(--cyan)">http://localhost:5000/api/test</span> — Main target</div>
+        <div>GET <span style="color:var(--cyan)">http://localhost:5000/api/data</span> — Data endpoint</div>
+        <div>GET <span style="color:var(--cyan)">http://localhost:5000/api/search?q=test</span> — Search endpoint</div>
+        <div style="color:var(--txt2);margin-top:6px">After ~5 consecutive attack predictions from same IP → auto-blocked (403)</div>
+        <div style="color:var(--txt2)">After req rate &gt; 200/s AND attack prediction → immediate block</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════ SETTINGS ═════════ -->
+<div class="page" id="pg-settings">
+  <div class="pg-hdr"><div><div class="pg-title">Settings</div></div></div>
+  <div class="card"><div class="card-b">
+    <div class="srow">
+      <div><div class="slbl">🔊 Sound Alerts</div><div class="sdesc">Play beep on attack detection</div></div>
+      <label class="tog"><input type="checkbox" id="sndToggle" checked onchange="soundEnabled=this.checked"><span class="tog-sl"></span></label>
+    </div>
+    <div class="srow">
+      <div><div class="slbl">🔄 Auto-Block IPs</div><div class="sdesc">Block IPs after 5 consecutive attack predictions</div></div>
+      <label class="tog"><input type="checkbox" checked><span class="tog-sl"></span></label>
+    </div>
+    <div class="srow">
+      <div><div class="slbl">⏱️ Auto-Unblock</div><div class="sdesc">Unblock IPs after 5 minutes automatically</div></div>
+      <label class="tog"><input type="checkbox" checked><span class="tog-sl"></span></label>
+    </div>
+    <div class="srow">
+      <div><div class="slbl">🗺️ Show Attack Map</div><div class="sdesc">Display origin dots on geographic map</div></div>
+      <label class="tog"><input type="checkbox" checked><span class="tog-sl"></span></label>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:10px">
+      <button class="btn btn-r" onclick="clearAllBlocks()">🗑️ Clear All Blocks</button>
+      <button class="btn btn-c" onclick="fetchStatus()">🔄 Refresh Status</button>
+    </div>
+  </div></div>
+</div>
+
+</main>
+
+<script>
+// ── State ──
+const socket     = io();
+let allAttacks   = [], allBlocked = [];
+let soundEnabled = true;
+let modelInfo    = {};
+let chartData    = { labels:[], benign:[], attack:[] };
+let attackTypeCounts = {};
+const MAX_PTS = 60;
+
+// ── Charts ──
+const tlChart = new Chart(document.getElementById('timelineChart'), {
+  type:'line',
+  data:{ labels:[], datasets:[
+    {label:'Benign', data:[], borderColor:'#00ff88', backgroundColor:'rgba(0,255,136,.07)', borderWidth:2, pointRadius:0, fill:true, tension:.4},
+    {label:'Attack', data:[], borderColor:'#ff2244', backgroundColor:'rgba(255,34,68,.09)', borderWidth:2, pointRadius:0, fill:true, tension:.4},
+  ]},
+  options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{color:'#5a7a99',font:{size:10}}}},
+    scales:{ x:{grid:{color:'rgba(26,53,80,.3)'},ticks:{color:'#5a7a99',maxTicksLimit:8,font:{size:10}}},
+      y:{grid:{color:'rgba(26,53,80,.3)'},ticks:{color:'#5a7a99',font:{size:10}},beginAtZero:true} }, animation:{duration:200} }
+});
+
+const trendC = new Chart(document.getElementById('trendChart'), {
+  type:'line',
+  data:{ labels:[], datasets:[
+    {label:'Total', data:[], borderColor:'#00d4ff', backgroundColor:'rgba(0,212,255,.06)', borderWidth:2, pointRadius:0, fill:true, tension:.4},
+    {label:'Attack', data:[], borderColor:'#ff2244', backgroundColor:'rgba(255,34,68,.08)', borderWidth:2, pointRadius:0, fill:true, tension:.4},
+  ]},
+  options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{color:'#5a7a99',font:{size:10}}}},
+    scales:{ x:{grid:{color:'rgba(26,53,80,.3)'},ticks:{color:'#5a7a99',maxTicksLimit:8,font:{size:10}}},
+      y:{grid:{color:'rgba(26,53,80,.3)'},ticks:{color:'#5a7a99',font:{size:10}},beginAtZero:true} }, animation:{duration:200} }
+});
+
+const mlC = new Chart(document.getElementById('mlChart'), {
+  type:'bar',
+  data:{ labels:['RandomForest','GradientBoosting','SGD/SVM'],
+    datasets:[
+      {label:'Accuracy', data:[0,0,0], backgroundColor:'rgba(0,212,255,.35)', borderColor:'#00d4ff', borderWidth:1},
+      {label:'F1 Score', data:[0,0,0], backgroundColor:'rgba(0,255,136,.3)', borderColor:'#00ff88', borderWidth:1},
+    ]},
+  options:{ responsive:true, maintainAspectRatio:false,
+    plugins:{legend:{labels:{color:'#5a7a99',font:{size:10}}}},
+    scales:{ x:{grid:{color:'rgba(26,53,80,.3)'},ticks:{color:'#5a7a99',font:{size:10}}},
+      y:{grid:{color:'rgba(26,53,80,.3)'},ticks:{color:'#5a7a99',font:{size:10}},min:0,max:1} } }
+});
+
+const distC = new Chart(document.getElementById('distChart'), {
+  type:'bar',
+  data:{ labels:[], datasets:[{label:'Attacks', data:[],
+    backgroundColor:['rgba(0,212,255,.5)','rgba(255,34,68,.5)','rgba(153,68,255,.5)','rgba(255,204,0,.5)','rgba(0,255,136,.5)','rgba(255,136,0,.5)'],
+    borderColor:['#00d4ff','#ff2244','#9944ff','#ffcc00','#00ff88','#ff8800'], borderWidth:1 }]},
+  options:{ responsive:true, maintainAspectRatio:false,
+    plugins:{legend:{display:false}},
+    scales:{ x:{grid:{color:'rgba(26,53,80,.3)'},ticks:{color:'#5a7a99',font:{size:10}}},
+      y:{grid:{color:'rgba(26,53,80,.3)'},ticks:{color:'#5a7a99',font:{size:10}},beginAtZero:true} } }
+});
+
+const donutC = new Chart(document.getElementById('donutChart'), {
+  type:'doughnut',
+  data:{ labels:[], datasets:[{data:[], backgroundColor:['#ff2244','#9944ff','#ffcc00','#00d4ff','#ff8800','#00ff88'],
+    borderColor:'#0a1520', borderWidth:2 }]},
+  options:{ responsive:true, maintainAspectRatio:true, cutout:'65%',
+    plugins:{ legend:{ position:'right', labels:{color:'#5a7a99',font:{size:9},boxWidth:10}}} }
+});
+
+// ── Helper ──
+const ATYPE_TAG = {
+  'DrDoS_UDP':'udp','DrDoS_LDAP':'ldap','DrDoS_MSSQL':'mssql',
+  'SYN Flood':'syn','HTTP Flood':'http','Volumetric Flood':'syn','DDoS Attack':'attack'
+};
+
+function typeTag(t){
+  const cls = ATYPE_TAG[t] || 'attack';
+  return `<span class="tag ${cls}">${t}</span>`;
+}
+
+function addTick(b){ // b = {ts,benign,attack,total}
+  const t = new Date(b.ts*1000).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  [tlChart,trendC].forEach(c=>{
+    c.data.labels.push(t);
+    if(c===tlChart){ c.data.datasets[0].data.push(b.benign||0); c.data.datasets[1].data.push(b.attack||0); }
+    else { c.data.datasets[0].data.push(b.total||0); c.data.datasets[1].data.push(b.attack||0); }
+    if(c.data.labels.length>MAX_PTS){ c.data.labels.shift(); c.data.datasets.forEach(d=>d.data.shift()); }
+    c.update('none');
+  });
+}
+
+function updateAttackTypes(obj){
+  attackTypeCounts = obj;
+  const types  = Object.keys(obj);
+  const counts = Object.values(obj);
+  const total  = counts.reduce((a,b)=>a+b,0);
+
+  distC.data.labels   = types;
+  distC.data.datasets[0].data = counts;
+  distC.update();
+
+  donutC.data.labels   = types;
+  donutC.data.datasets[0].data = counts;
+  donutC.update();
+  document.getElementById('donutCenter').textContent = total;
+  document.getElementById('scTypes').textContent = types.length;
+
+  // Breakdown bars
+  const maxC = Math.max(...counts, 1);
+  const COLORS=['#ff2244','#9944ff','#ffcc00','#00d4ff','#ff8800','#00ff88'];
+  document.getElementById('typeBreakdown').innerHTML = types.map((t,i)=>`
+    <div class="dist-bar">
+      <div class="dist-label">${t}</div>
+      <div class="dist-track"><div class="dist-fill" style="width:${counts[i]/maxC*100}%;background:${COLORS[i%COLORS.length]}"></div></div>
+      <div class="dist-pct">${((counts[i]/total)*100).toFixed(0)}%</div>
+    </div>`).join('');
+}
+
+function updateStats(s){
+  document.getElementById('scAttacks').textContent = (s.attacks_detected||0).toLocaleString();
+  document.getElementById('scBlocked').textContent = (s.ips_blocked||0).toLocaleString();
+  document.getElementById('t-total').textContent   = (s.total_requests||0).toLocaleString();
+  document.getElementById('t-atk').textContent     = (s.attacks_detected||0).toLocaleString();
+  document.getElementById('t-ben').textContent     = (s.benign_requests||0).toLocaleString();
+  document.getElementById('t-blk').textContent     = (s.ips_blocked||0).toLocaleString();
+  if(s.total_requests>0)
+    document.getElementById('t-rate').textContent = ((s.attacks_detected/s.total_requests)*100).toFixed(1)+'%';
+  if(s.uptime_seconds){
+    const h=Math.floor(s.uptime_seconds/3600),m=Math.floor((s.uptime_seconds%3600)/60),sec=s.uptime_seconds%60;
+    document.getElementById('sbUptime').textContent=`${h}h ${m}m ${sec}s`;
+  }
+}
+
+function addAtkRow(e, feedId){
+  const feed = document.getElementById(feedId);
+  if(!feed) return;
+  const row = document.createElement('div');
+  row.className = 'tbl-row atk-row';
+  row.style.gridTemplateColumns = '110px 1fr 100px 100px 60px';
+  row.innerHTML = `<span>${typeTag(e.attack_type)}</span><span style="color:#0099cc">${e.ip}</span><span style="color:#5a7a99">${e.req_rate}/s</span><span style="color:#5a7a99">${e.time}</span><button class="unblock" style="background:rgba(255,34,68,.1);color:var(--red);border-color:rgba(255,34,68,.2)" onclick="blockIP('${e.ip}')">BLOCK</button>`;
+  feed.prepend(row);
+  if(feed.children.length>150) feed.removeChild(feed.lastChild);
+}
+
+function addAtkFullRow(e){
+  const feed = document.getElementById('atkFullFeed');
+  const row  = document.createElement('div');
+  row.className = 'tbl-row';
+  row.style.gridTemplateColumns = '120px 140px 1fr 80px 100px 160px';
+  row.innerHTML = `<span>${typeTag(e.attack_type)}</span><span style="color:#0099cc">${e.ip}</span><span style="color:#5a7a99;overflow:hidden;text-overflow:ellipsis">${e.path||'/'}</span><span style="color:var(--yellow)">${e.req_rate}/s</span><span style="color:var(--txt2)">${(e.confidence*100).toFixed(0)}%</span><span style="color:#5a7a99">${e.time}</span>`;
+  feed.prepend(row);
+  if(feed.children.length>300) feed.removeChild(feed.lastChild);
+}
+
+function addBlkRow(b, feedId){
+  const feed = document.getElementById(feedId);
+  if(!feed) return;
+  const row = document.createElement('div');
+  row.className='tbl-row';
+  row.style.gridTemplateColumns='130px 1fr 150px';
+  row.innerHTML=`<span style="color:var(--red)">${b.ip}</span><span class="tag blocked">${b.reason||'Attack'}</span><span style="color:#5a7a99">${b.time}</span>`;
+  feed.prepend(row);
+  if(feed.children.length>50) feed.removeChild(feed.lastChild);
+}
+
+function addLiveFeed(e){
+  const feed = document.getElementById('liveFeed');
+  const row  = document.createElement('div');
+  row.className = 'tbl-row atk-row';
+  row.style.gridTemplateColumns = '110px 1fr 100px 100px 60px';
+  const isAtk = e.label==='ATTACK';
+  row.innerHTML = `<span>${isAtk?typeTag(e.attack_type):'<span class="tag benign">BENIGN</span>'}</span><span style="color:#0099cc">${e.ip}</span><span style="color:#5a7a99;overflow:hidden;text-overflow:ellipsis">${e.path||'/'}</span><span style="color:#5a7a99">${e.time}</span><button class="unblock" style="background:rgba(255,34,68,.1);color:var(--red);border-color:rgba(255,34,68,.2)" onclick="blockIP('${e.ip}')">BLOCK</button>`;
+  feed.prepend(row);
+  if(feed.children.length>200) feed.removeChild(feed.lastChild);
+  document.getElementById('feedCnt').textContent = feed.children.length;
+}
+
+async function blockIP(ip){
+  showToast(`🚫 Blocking ${ip}...`);
+  await fetch(`/api/block/${ip}`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ reason: 'Manual Block' })
+  });
+}
+
+function updateBlockedTable(list){
+  const tbody = document.getElementById('blkTableBody');
+  document.getElementById('blkFullCnt').textContent = list.length+' blocked';
+  document.getElementById('scBlocked').textContent  = list.length;
+  if(!list.length){
+    tbody.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--txt2);padding:30px">No IPs blocked</td></tr>';
+    return;
+  }
+  const now=Date.now()/1000;
+  tbody.innerHTML=list.map(b=>`
+    <tr style="border-bottom:1px solid rgba(26,53,80,.4)">
+      <td style="padding:10px 14px;color:var(--red);font-family:var(--mono);font-size:11px">${b.ip}</td>
+      <td style="padding:10px 14px"><span class="tag blocked">${b.reason||'Attack'}</span></td>
+      <td style="padding:10px 14px;color:var(--txt2);font-family:var(--mono);font-size:11px">${new Date(b.blocked_at*1000).toLocaleString()}</td>
+      <td style="padding:10px 14px;font-family:var(--mono);font-size:11px;color:var(--txt2)">${b.expires?Math.max(0,Math.floor(b.expires-now))+'s':'∞'}</td>
+      <td style="padding:10px 14px"><button class="unblock" onclick="unblock('${b.ip}')">UNBLOCK</button></td>
+    </tr>`).join('');
+}
+
+function updateModelInfo(info){
+  modelInfo=info;
+  document.getElementById('sbModel').textContent  = info.model_name||'None';
+  document.getElementById('t-model').textContent  = info.model_name||'—';
+  document.getElementById('mlBest').textContent   = info.model_name||'—';
+  const res=info.all_results||{};
+  const names=['RandomForest','GradientBoosting','SGD_SVM'];
+  const lbls =['RandomForest','GradientBoosting','SGD/SVM'];
+  mlC.data.datasets[0].data=names.map(n=>res[n]?res[n].accuracy:0);
+  mlC.data.datasets[1].data=names.map(n=>res[n]?res[n].f1:0);
+  mlC.update();
+  if(res[info.model_name]){
+    document.getElementById('mlAcc').textContent=(res[info.model_name].accuracy*100).toFixed(1)+'%';
+    document.getElementById('mlF1').textContent =(res[info.model_name].f1*100).toFixed(1)+'%';
+  }
+  document.getElementById('mlCards').innerHTML=names.map((n,i)=>{
+    const r=res[n]||{};const best=n===info.model_name;
+    return `<div class="ml-card ${best?'best':''}">
+      <div class="ml-name">${lbls[i]}${best?'<span class="ml-star">★ BEST</span>':''}</div>
+      <div class="metrics">
+        <div class="metric"><div class="metric-l">Accuracy</div><div class="metric-v">${r.accuracy?(r.accuracy*100).toFixed(1)+'%':'—'}</div></div>
+        <div class="metric"><div class="metric-l">F1 Score</div><div class="metric-v">${r.f1?(r.f1*100).toFixed(1)+'%':'—'}</div></div>
+      </div>
+      <div class="pbar"><div class="pfill" style="width:${r.accuracy?r.accuracy*100:0}%"></div></div>
+    </div>`;
+  }).join('');
+}
+
+function updateStatusPill(under){
+  const pill=document.getElementById('statusPill');
+  const txt =document.getElementById('statusTxt');
+  pill.className=`status-pill ${under?'attack':'ok'}`;
+  txt.textContent=under?'UNDER ATTACK':'PROTECTED';
+}
+
+// Attack map
+const GEO=[
+  {lat:28.6,lon:77.2},{lat:39.9,lon:116.4},{lat:37.8,lon:-122.4},{lat:51.5,lon:-0.1},
+  {lat:55.7,lon:37.6},{lat:-23.5,lon:-46.6},{lat:48.8,lon:2.3},{lat:35.7,lon:139.7},
+  {lat:-33.9,lon:151.2},{lat:1.35,lon:103.8},{lat:41.0,lon:29.0},{lat:25.2,lon:55.3}
+];
+const ipGeo={};
+function getGeo(ip){ if(!ipGeo[ip]) ipGeo[ip]=GEO[Math.floor(Math.random()*GEO.length)]; return ipGeo[ip]; }
+
+function addMapDot(ip,label){
+  const g=getGeo(ip);
+  const map=document.getElementById('mapDots');
+  const d=document.createElement('div');
+  d.className='map-dot a';
+  d.style.left=((g.lon+180)/360*100).toFixed(1)+'%';
+  d.style.top =((90-g.lat)/180*100).toFixed(1)+'%';
+  d.title=`${ip}`;
+  map.appendChild(d);
+  if(map.children.length>80) map.removeChild(map.firstChild);
+}
+
+// Sound
+let aCtx=null;
+function beep(){
+  if(!soundEnabled) return;
+  try{
+    if(!aCtx) aCtx=new(window.AudioContext||window.webkitAudioContext)();
+    const o=aCtx.createOscillator(),g=aCtx.createGain();
+    o.connect(g);g.connect(aCtx.destination);
+    o.type='sawtooth';o.frequency.setValueAtTime(660,aCtx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(220,aCtx.currentTime+.3);
+    g.gain.setValueAtTime(.12,aCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.001,aCtx.currentTime+.4);
+    o.start();o.stop(aCtx.currentTime+.4);
+  }catch(e){}
+}
+
+function showToast(msg){
+  const t=document.getElementById('toast');
+  document.getElementById('toastMsg').textContent=msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),3500);
+}
+
+// ── Socket ──
+socket.on('connect',()=>console.log('Connected'));
+socket.on('init',d=>{
+  updateStats(d.stats||{});
+  if(d.model_info) updateModelInfo(d.model_info);
+  (d.attacks||[]).forEach(e=>{addAtkRow(e,'atkFeed');addAtkFullRow(e)});
+  if(d.blocked) updateBlockedTable(d.blocked);
+  if(d.attack_types) updateAttackTypes(d.attack_types);
+  (d.traffic||[]).forEach(t=>addTick(t));
+  updateStatusPill(d.under_attack);
+  allBlocked=d.blocked||[];
+  allAttacks=d.attacks||[];
+  document.getElementById('atkCount').textContent   = allAttacks.length;
+  document.getElementById('atkBadge').textContent   = allAttacks.length;
+  document.getElementById('atkFullCnt').textContent = allAttacks.length+' events';
+});
+
+socket.on('attack_event',e=>{
+  allAttacks.unshift(e);
+  addAtkRow(e,'atkFeed');
+  addAtkFullRow(e);
+  addLiveFeed(e);
+  addMapDot(e.ip,'attack');
+  beep();
+  showToast(`🚨 ${e.attack_type} from ${e.ip}`);
+  document.getElementById('atkCount').textContent   = Math.min(allAttacks.length,99);
+  document.getElementById('atkBadge').textContent   = Math.min(allAttacks.length,99);
+  document.getElementById('atkFullCnt').textContent = allAttacks.length+' events';
+});
+
+socket.on('traffic_event',e=>{
+  addLiveFeed(e);
+});
+
+socket.on('traffic_tick',d=>{
+  addTick(d);
+  if(d.stats) updateStats(d.stats);
+  if(d.attack_types) updateAttackTypes(d.attack_types);
+  updateStatusPill(d.under_attack);
+  document.getElementById('blkBadge').textContent = d.blocked_count||0;
+});
+
+socket.on('stats_update',d=>{
+  if(d.stats) updateStats(d.stats);
+  if(d.attack_types) updateAttackTypes(d.attack_types);
+  updateStatusPill(d.under_attack);
+});
+
+socket.on('ip_blocked',b=>{
+  allBlocked.unshift(b);
+  addBlkRow(b,'blkFeed');
+  showToast(`🚫 BLOCKED: ${b.ip} — ${b.reason}`);
+  document.getElementById('blkCount').textContent = allBlocked.length;
+  document.getElementById('blkBadge').textContent = allBlocked.length;
+});
+
+socket.on('blocked_update',list=>{
+  allBlocked=list;
+  updateBlockedTable(list);
+});
+
+// ── Nav ──
+function go(name){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
+  document.querySelectorAll('.navlink').forEach(n=>n.classList.remove('on'));
+  document.getElementById('pg-'+name).classList.add('on');
+  document.querySelector(`[onclick="go('${name}')"]`).classList.add('on');
+}
+
+function switchTab(name){
+  ['overview','geographic','timeline'].forEach(t=>{
+    const el=document.getElementById('tab-'+t);
+    if(el) el.style.display = t===name?'block':'none';
+  });
+  document.querySelectorAll('.tab').forEach((t,i)=>{
+    t.classList.toggle('on',['overview','geographic','timeline'][i]===name);
+  });
+}
+
+async function simulateAttack(){
+  const types = ['DrDoS_UDP', 'DrDoS_LDAP', 'DrDoS_MSSQL'];
+  const type  = types[Math.floor(Math.random()*types.length)];
+  const ip    = '1.2.3.'+Math.floor(Math.random()*254);
+  showToast(`🚀 Launching simulated ${type}...`);
+  await fetch('/api/simulate', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ type, ip, count: 10 })
+  });
+}
+
+// ── API ──
+async function fetchStatus(){
+  const d=await(await fetch('/api/status')).json();
+  if(d.model_info) updateModelInfo(d.model_info);
+  updateStats(d); if(d.attack_types) updateAttackTypes(d.attack_types);
+}
+
+async function unblock(ip){
+  await fetch(`/api/unblock/${ip}`,{method:'DELETE'});
+}
+
+async function clearAllBlocks(){
+  await fetch('/api/clear_blocks',{method:'POST'});
+}
+
+// Clock
+setInterval(()=>{ document.getElementById('navClock').textContent=new Date().toLocaleTimeString(); },1000);
+fetchStatus();
+</script>
+</body>
+</html>
